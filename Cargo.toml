@@ -7,6 +7,10 @@ license = "MIT"
 
 [dependencies]
 iced_core = "0.14"
+peercred-ipc = { path = "../peercred-ipc", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+tokio = { version = "1", features = ["sync", "time"], optional = true }
+glob = { version = "0.3", optional = true }
 
 [dev-dependencies]
 iced = { version = "0.14", features = ["tiny-skia"] }
@@ -14,3 +18,5 @@ iced = { version = "0.14", features = ["tiny-skia"] }
 [features]
 # Enable integration with iced_test Simulator
 test = []
+# Enable IPC debug server for runtime layout inspection
+server = ["dep:peercred-ipc", "dep:serde", "dep:tokio", "dep:glob"]

@@ -27,6 +27,9 @@
 mod operation;
 mod output;
 
+#[cfg(feature = "server")]
+pub mod server;
+
 pub use operation::{LayoutDumper, LayoutInspector};
 pub use output::{LayoutDump, LayoutEntry, LayoutWarning, WidgetKind};
 

@@ -1,4 +1,4 @@
-# iced-layout-inspector Design Rationale
+# iced-layout-inspector Design Document
 
 ## Problem Statement
 
@@ -8,187 +8,300 @@ When developing iced GUIs, elements frequently fail to render with no visual fee
 - Incorrect flex/alignment behavior
 - Clipping by parent containers
 
-Unlike web development with browser DevTools, iced provides no built-in way to inspect the layout tree and see element bounds. This makes debugging layout issues a frustrating trial-and-error process.
+Unlike web development with browser DevTools, iced provides no built-in way to inspect the layout tree and see element bounds.
 
-**The specific challenge for AI-assisted development**: Claude cannot see the rendered UI. When helping develop iced applications, Claude writes code blind and relies on user feedback about what's wrong. A text-based layout dump gives Claude visibility into the actual rendered state.
-
-## Design Goals
-
-1. **Text-based output** - Produce a format Claude can read and understand
-2. **Non-intrusive** - Work with existing iced apps without code changes
-3. **Headless operation** - Run without a display via `iced_test::Simulator`
-4. **Warning detection** - Automatically flag common layout problems
-5. **Navigation support** - Work with multi-screen apps by supporting state navigation
+**The specific challenge for AI-assisted development**: Claude cannot see the rendered UI. When helping develop iced applications, Claude writes code blind and relies on user feedback about what's wrong. This library gives Claude:
+1. **Layout visibility** - Text-based widget tree with bounds
+2. **Remote control** - IPC commands to interact with the app without human intervention
 
 ## Architecture
 
-### Core Components
-
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  LayoutInspector (implements iced Operation trait)          │
-│  - Traverses widget tree                                    │
-│  - Collects bounds for each widget                          │
-│  - Records widget type and ID                               │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  LayoutDump                                                  │
-│  - Stores collected entries                                  │
-│  - Formats as ASCII tree                                     │
-│  - Detects and flags warnings                                │
-│  - Writes to file                                            │
-└─────────────────────────────────────────────────────────────┘
+│                     iced Application                         │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────┐ │
+│  │   App State │◄───│   update()  │◄───│  subscription() │ │
+│  └─────────────┘    └─────────────┘    └────────┬────────┘ │
+│         │                  ▲                     │          │
+│         ▼                  │              poll @ 50ms       │
+│  ┌─────────────┐    ┌─────────────┐             │          │
+│  │    view()   │───►│ LayoutDumper│             │          │
+│  └─────────────┘    └─────────────┘             │          │
+│                            │                     │          │
+└────────────────────────────│─────────────────────│──────────┘
+                             │                     │
+                             ▼                     ▼
+                      ┌─────────────┐    ┌─────────────────┐
+                      │ Layout Dump │    │  Debug Server   │
+                      │   (text)    │    │ (Unix socket)   │
+                      └─────────────┘    └────────┬────────┘
+                                                  │
+                                         /tmp/iced-debug-{pid}.sock
+                                                  │
+                                                  ▼
+                                         ┌─────────────────┐
+                                         │   iced-debug    │
+                                         │     (CLI)       │
+                                         └─────────────────┘
 ```
 
-### Why Operation Trait?
+## Core Components
 
-Iced's `Operation` trait is designed for traversing the widget tree:
+### 1. Layout Inspector (`operation.rs`)
+
+Implements iced's `Operation` trait to traverse the widget tree.
 
 ```rust
-pub trait Operation<T> {
+pub struct LayoutDumper {
+    inspector: LayoutInspector,
+}
+
+impl Operation<LayoutDump> for LayoutDumper {
     fn container(&mut self, id: Option<&Id>, bounds: Rectangle);
     fn text(&mut self, id: Option<&Id>, bounds: Rectangle, text: &str);
-    fn scrollable(&mut self, id, bounds, content_bounds, ...);
-    fn focusable(&mut self, id, bounds, ...);
-    fn text_input(&mut self, id, bounds, ...);
-    fn custom(&mut self, id, bounds, ...);
+    fn text_input(&mut self, id: Option<&Id>, bounds: Rectangle, ...);
+    fn scrollable(&mut self, ...);
+    fn finish(&self) -> operation::Outcome<LayoutDump>;
 }
 ```
 
-Each method receives:
-- Widget ID (if set)
-- Computed bounds (position and size)
-- Widget-specific data (text content, scroll state, etc.)
-
-This gives us exactly what we need without modifying iced internals.
-
-### Why Not Custom Renderer?
-
-Alternative considered: Implement a custom `Renderer` that logs draw calls.
-
-Problems:
-- Renderer receives drawing primitives, not widget structure
-- No widget type information at render time
-- More complex to implement
-- Would require changes to app initialization
-
-The Operation approach is cleaner and already integrated into iced.
-
-## Output Format
-
-```
-[Viewport: 800x600]
-
-Found 6 widgets, 1 with warnings
-
-  Container #root (0,0 800x600)
-  `- Container (350,250 100x100)
-     |- Focusable #btn-plus (350,250 100x30)
-     |- Text "42" (380,290 40x50)
-     |- Focusable #btn-minus (350,350 100x30)
-!    `- Container #broken (350,390 100x0) [ZERO HEIGHT]
+**Usage:**
+```rust
+iced_runtime::task::widget(LayoutDumper::new(viewport)).map(Message::LayoutDumped)
 ```
 
-Format choices:
-- **Tree structure**: Shows parent-child relationships
-- **Bounds format**: `(x,y width×height)` - compact but complete
-- **Warning prefix**: `!` marks problematic elements
-- **ID display**: `#name` when widget has an ID
-- **Text content**: Quoted, truncated if long
+### 2. Layout Output (`output.rs`)
 
-### Warnings Detected
-
-| Warning | Condition | Significance |
-|---------|-----------|--------------|
-| INVISIBLE | width=0 AND height=0 | Element won't render at all |
-| ZERO WIDTH | width=0 | Horizontal collapse |
-| ZERO HEIGHT | height=0 | Vertical collapse |
-| OFFSCREEN | x<0 OR y<0 | Positioned outside viewport |
-| PARTIALLY OFFSCREEN | extends beyond viewport | May be clipped |
-| TOO SMALL | dimension < 1px | Effectively invisible |
-
-## Usage Patterns
-
-### Pattern 1: Quick Debug (with running app)
-
-Add a keyboard shortcut to dump layout on demand:
+Structured representation with automatic warning detection.
 
 ```rust
-fn update(&mut self, message: Message) -> Task<Message> {
-    if let Message::DumpLayout = message {
-        // Would need access to UserInterface, which is internal
-        // This pattern requires iced_test integration
+pub struct LayoutDump {
+    pub viewport: Viewport,
+    pub entries: Vec<LayoutEntry>,
+}
+
+pub struct LayoutEntry {
+    pub depth: usize,
+    pub kind: WidgetKind,
+    pub id: Option<String>,
+    pub bounds: (f32, f32, f32, f32),  // x, y, width, height
+    pub extra: Option<String>,
+}
+```
+
+**Output format:**
+```
+[Viewport: 900x600]
+
+Found 32 widgets, 5 with warnings
+
+! Container (0,0 828x989) [PARTIALLY OFFSCREEN]
+  |- Text "GitHub" (320,20 80x31)
+  |- TextInput (10,10 220x37)
+  `- Container (5,82 290x29)
+     `- Text "AWS Console" (11,88 80x17)
+```
+
+**Warnings detected:**
+| Warning | Condition |
+|---------|-----------|
+| INVISIBLE | width=0 AND height=0 |
+| ZERO WIDTH | width=0 |
+| ZERO HEIGHT | height=0 |
+| OFFSCREEN | x<0 OR y<0 |
+| PARTIALLY OFFSCREEN | extends beyond viewport |
+
+### 3. Debug Server (`server.rs`, feature = "server")
+
+Unix socket IPC using `peercred-ipc` for remote control.
+
+**IPC Protocol:**
+```rust
+// Requests (client → server)
+enum Request {
+    Dump,                                    // Get layout tree
+    Input { field: String, value: String },  // Set text input by placeholder
+    Click { label: String },                 // Click button by label
+    Submit,                                  // Press Enter
+    Ping,                                    // Health check
+}
+
+// Responses (server → client)
+enum Response {
+    Layout(String),  // Layout dump text
+    Ok,              // Success
+    Pong,            // Ping response
+    Error(String),   // Error message
+}
+```
+
+**Socket:** `/tmp/iced-debug-{pid}.sock`
+
+### 4. Debug CLI (`iced-debug`)
+
+```bash
+iced-debug list                    # Find running servers
+iced-debug dump                    # Get layout
+iced-debug input "field" "value"   # Type into field
+iced-debug click "label"           # Click button
+iced-debug submit                  # Press Enter
+```
+
+## Integration Guide
+
+### Minimal App Integration
+
+```rust
+use iced_layout_inspector::server::{self, Command};
+
+struct App {
+    debug_rx: server::CommandReceiver,
+    pending_dump: Option<oneshot::Sender<String>>,
+    // ... app state
+}
+
+impl App {
+    fn new() -> (Self, Task<Message>) {
+        let debug_rx = server::init();
+        (Self { debug_rx, pending_dump: None, ... }, Task::none())
+    }
+
+    fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::DebugPoll => {
+                while let Ok(cmd) = self.debug_rx.try_recv() {
+                    match cmd {
+                        Command::Dump { respond } => {
+                            self.pending_dump = Some(respond);
+                            return Task::done(Message::DumpLayout);
+                        }
+                        Command::Input { field, value, respond } => {
+                            let result = self.handle_input(&field, &value);
+                            let _ = respond.send(result);
+                        }
+                        Command::Click { label, respond } => {
+                            let result = self.handle_click(&label);
+                            let _ = respond.send(result);
+                            if label == "Submit" && result.is_ok() {
+                                return Task::done(Message::Submit);
+                            }
+                        }
+                        Command::Submit { respond } => {
+                            let _ = respond.send(Ok(()));
+                            return Task::done(Message::Submit);
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::DumpLayout => {
+                let viewport = Viewport::new(900.0, 600.0);
+                iced_runtime::task::widget(LayoutDumper::new(viewport))
+                    .map(Message::LayoutDumped)
+            }
+            Message::LayoutDumped(dump) => {
+                if let Some(respond) = self.pending_dump.take() {
+                    let _ = respond.send(dump.to_string());
+                }
+                Task::none()
+            }
+            // ... other messages
+        }
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        time::every(Duration::from_millis(50)).map(|_| Message::DebugPoll)
+    }
+
+    fn handle_input(&mut self, field: &str, value: &str) -> Result<(), String> {
+        match field.to_lowercase().as_str() {
+            "username" => { self.username = value.into(); Ok(()) }
+            "password" => { self.password = value.into(); Ok(()) }
+            _ => Err(format!("Unknown field: {}", field))
+        }
+    }
+
+    fn handle_click(&mut self, label: &str) -> Result<(), String> {
+        match label.to_lowercase().as_str() {
+            "login" | "submit" => Ok(()),
+            _ => Err(format!("Unknown button: {}", label))
+        }
     }
 }
 ```
 
-### Pattern 2: Headless Test (recommended)
+## Design Decisions
 
-Use `iced_test::Simulator` for headless inspection:
+### Why Unix Sockets over File Triggers?
 
-```rust
-use iced_test::simulator;
-use iced_layout_inspector::LayoutInspector;
+Initial implementation used file-based polling (`/tmp/claude/enpass-trigger`). Switched to Unix sockets because:
 
-let mut app = MyApp::new();
-let mut ui = simulator(app.view());
+| Aspect | File Trigger | Unix Socket |
+|--------|--------------|-------------|
+| Latency | Poll interval (100ms) | Instant |
+| CPU | Constant polling | Event-driven |
+| Response | Separate output file | Direct reply |
+| Cleanup | Manual file deletion | Auto on close |
 
-// Navigate to desired state
-ui.click("Settings");
-for msg in ui.into_messages() {
-    app.update(msg);
-}
-let mut ui = simulator(app.view());
+### Why Polling Subscription?
 
-// Dump layout
-let mut inspector = LayoutInspector::new(Viewport::new(800.0, 600.0));
-// ui.operate(&mut inspector);  // Need to expose this
-let dump = inspector.into_dump();
-dump.write_to_file("layout.txt")?;
-```
+iced subscriptions are message-driven. Options considered:
 
-### Pattern 3: Scripted Navigation
+1. **Custom async stream** - Requires `iced_runtime`, complex lifetimes
+2. **Global channel** - Testing issues, lifetime problems with oneshot
+3. **Timer polling** - Simple, reliable, works with standard iced patterns
 
-For complex apps, define navigation scripts:
+50ms interval chosen: 20 checks/second is imperceptible latency while minimizing overhead.
 
-```
-preset "logged_in"
-click "Settings"
-click "Profile"
-dump_layout "profile.txt"
-```
+### Why Field/Button Matching by Text?
+
+Alternatives:
+- **Widget IDs** - Rarely set in practice, app must add them
+- **Coordinates** - Fragile, changes with layout
+- **Index** - Non-obvious, brittle
+
+Text matching is natural: "click Login", "type password into Password field".
+
+### Why App Must Implement Handlers?
+
+iced doesn't expose a way to inject synthetic input events. The app must:
+1. Map field placeholders → state fields
+2. Map button labels → actions
+
+This is explicit but requires per-app implementation.
 
 ## Limitations
 
-1. **Widget Type Granularity**: The Operation trait has limited widget types:
-   - Container (includes Row, Column, Container)
-   - Scrollable
-   - Focusable (includes Button)
-   - TextInput
-   - Text
-   - Custom
-
-   More specific widget types (Button vs generic Focusable) would require changes to iced.
-
-2. **No Style Information**: We get bounds but not colors, borders, or other styling.
-
-3. **Simulator Access**: The `Simulator::operate()` method exists but may need to be made public or we need to access `raw.operate()`.
-
-4. **State Navigation**: Multi-step navigation requires manual message processing loop.
-
-## Future Enhancements
-
-1. **Simulator Extension**: Add `dump_layout()` method directly to Simulator
-2. **Script Runner**: Parse and execute `.ice`-like navigation scripts
-3. **Diff Mode**: Compare two layout dumps to see what changed
-4. **JSON Output**: Machine-readable format for tooling integration
-5. **Visual Output**: Generate SVG/HTML visualization of the layout tree
+1. **No automatic input injection** - App must implement handlers
+2. **Text matching** - Requires consistent naming conventions
+3. **Fixed viewport** - Layout dump uses specified dimensions
+4. **No screenshots** - Text representation only
+5. **Single-screen focus** - No multi-window support
 
 ## Dependencies
 
-- `iced_core` - Core types only, no windowing dependencies
-- No runtime dependencies on `iced_test` (optional integration)
+```toml
+[dependencies]
+iced_core = "0.14"
 
-This keeps the crate lightweight and usable in any context.
+[dependencies.server]  # feature = "server"
+peercred-ipc = "0.1"   # Unix socket IPC with SO_PEERCRED
+serde = "1"            # Serialization
+tokio = "1"            # Async runtime for server
+glob = "0.3"           # Socket discovery
+```
+
+## Security Considerations
+
+- Socket permissions: 0o666 (world-accessible)
+- `peercred-ipc` provides caller UID/PID if needed
+- Local-only by design
+- Consider restricting to same-user in production
+
+## Future Enhancements
+
+1. **Screenshot capture** - Render to image
+2. **Widget ID support** - Match by stable ID
+3. **State serialization** - Dump app state
+4. **Record/replay** - Capture interaction sequences
+5. **Diff mode** - Compare layout changes
