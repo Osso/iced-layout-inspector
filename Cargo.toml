@@ -1,0 +1,16 @@
+[package]
+name = "iced-layout-inspector"
+version = "0.1.0"
+edition = "2024"
+description = "Layout debugging tools for iced - dump widget tree with bounds for headless inspection"
+license = "MIT"
+
+[dependencies]
+iced_core = "0.14"
+
+[dev-dependencies]
+iced = { version = "0.14", features = ["tiny-skia"] }
+
+[features]
+# Enable integration with iced_test Simulator
+test = []
