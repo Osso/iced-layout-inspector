@@ -67,6 +67,51 @@ impl fmt::Display for LayoutWarning {
     }
 }
 
+/// RGBA color representation for layout dumps.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DumpColor {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl DumpColor {
+    /// Create a new color from RGBA values (0.0-1.0 range).
+    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a }
+    }
+
+    /// Create from an iced Color.
+    pub fn from_iced(color: iced_core::Color) -> Self {
+        Self {
+            r: color.r,
+            g: color.g,
+            b: color.b,
+            a: color.a,
+        }
+    }
+
+    /// Format as hex color (#RRGGBB or #RRGGBBAA).
+    pub fn to_hex(&self) -> String {
+        let r = (self.r * 255.0).round() as u8;
+        let g = (self.g * 255.0).round() as u8;
+        let b = (self.b * 255.0).round() as u8;
+        if (self.a - 1.0).abs() < 0.01 {
+            format!("#{:02X}{:02X}{:02X}", r, g, b)
+        } else {
+            let a = (self.a * 255.0).round() as u8;
+            format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a)
+        }
+    }
+}
+
+impl fmt::Display for DumpColor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_hex())
+    }
+}
+
 /// A single entry in the layout dump.
 #[derive(Debug, Clone)]
 pub struct LayoutEntry {
@@ -85,6 +130,10 @@ pub struct LayoutEntry {
     pub extra: Option<String>,
     /// Layout warnings
     pub warnings: Vec<LayoutWarning>,
+    /// Background color (if available)
+    pub background: Option<DumpColor>,
+    /// Text/foreground color (if available)
+    pub text_color: Option<DumpColor>,
 }
 
 impl LayoutEntry {
@@ -134,12 +183,26 @@ impl LayoutEntry {
             height,
             extra,
             warnings,
+            background: None,
+            text_color: None,
         }
     }
 
     /// Returns true if this entry has any warnings.
     pub fn has_warnings(&self) -> bool {
         !self.warnings.is_empty()
+    }
+
+    /// Set the background color.
+    pub fn with_background(mut self, color: DumpColor) -> Self {
+        self.background = Some(color);
+        self
+    }
+
+    /// Set the text/foreground color.
+    pub fn with_text_color(mut self, color: DumpColor) -> Self {
+        self.text_color = Some(color);
+        self
     }
 }
 
@@ -225,8 +288,8 @@ impl LayoutDump {
                 .extra
                 .as_ref()
                 .map(|e| {
-                    let truncated = if e.len() > 30 {
-                        format!("{}...", &e[..27])
+                    let truncated = if e.chars().count() > 30 {
+                        format!("{}...", e.chars().take(27).collect::<String>())
                     } else {
                         e.clone()
                     };
@@ -242,11 +305,19 @@ impl LayoutDump {
                 format!(" [{}]", w.join(", "))
             };
 
+            // Format colors
+            let color_str = match (&entry.background, &entry.text_color) {
+                (Some(bg), Some(fg)) => format!(" bg:{} fg:{}", bg, fg),
+                (Some(bg), None) => format!(" bg:{}", bg),
+                (None, Some(fg)) => format!(" fg:{}", fg),
+                (None, None) => String::new(),
+            };
+
             let warning_prefix = if entry.has_warnings() { "! " } else { "  " };
 
             output.push_str(&format!(
-                "{}{}{}{}{} {}{}\n",
-                warning_prefix, indent, entry.kind, id_str, extra_str, bounds, warning_str
+                "{}{}{}{}{} {}{}{}\n",
+                warning_prefix, indent, entry.kind, id_str, extra_str, bounds, color_str, warning_str
             ));
         }
 

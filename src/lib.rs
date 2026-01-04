@@ -31,7 +31,7 @@ mod output;
 pub mod server;
 
 pub use operation::{LayoutDumper, LayoutInspector};
-pub use output::{LayoutDump, LayoutEntry, LayoutWarning, WidgetKind};
+pub use output::{DumpColor, LayoutDump, LayoutEntry, LayoutWarning, WidgetKind};
 
 /// Viewport size for layout inspection
 #[derive(Debug, Clone, Copy)]
