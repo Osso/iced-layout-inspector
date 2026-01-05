@@ -79,8 +79,13 @@ impl<T> Operation<T> for LayoutInspector {
         self.add_entry(WidgetKind::Scrollable, id, bounds, Some(extra));
     }
 
-    fn focusable(&mut self, id: Option<&Id>, bounds: Rectangle, _state: &mut dyn Focusable) {
-        self.add_entry(WidgetKind::Focusable, id, bounds, None);
+    fn focusable(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Focusable) {
+        let extra = if state.is_focused() {
+            Some("FOCUSED".to_string())
+        } else {
+            None
+        };
+        self.add_entry(WidgetKind::Focusable, id, bounds, extra);
     }
 
     fn text_input(&mut self, id: Option<&Id>, bounds: Rectangle, _state: &mut dyn TextInput) {
@@ -146,8 +151,13 @@ impl Operation<LayoutDump> for LayoutDumper {
         self.inspector.add_entry(WidgetKind::Scrollable, id, bounds, Some(extra));
     }
 
-    fn focusable(&mut self, id: Option<&Id>, bounds: Rectangle, _state: &mut dyn Focusable) {
-        self.inspector.add_entry(WidgetKind::Focusable, id, bounds, None);
+    fn focusable(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Focusable) {
+        let extra = if state.is_focused() {
+            Some("FOCUSED".to_string())
+        } else {
+            None
+        };
+        self.inspector.add_entry(WidgetKind::Focusable, id, bounds, extra);
     }
 
     fn text_input(&mut self, id: Option<&Id>, bounds: Rectangle, _state: &mut dyn TextInput) {
