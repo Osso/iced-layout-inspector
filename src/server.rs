@@ -82,15 +82,29 @@ pub enum Command {
     /// Dump layout - call respond with the layout string when ready
     Dump { respond: oneshot::Sender<String> },
     /// Set text input value
-    Input { field: String, value: String, respond: oneshot::Sender<Result<(), String>> },
+    Input {
+        field: String,
+        value: String,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
     /// Click a button
-    Click { label: String, respond: oneshot::Sender<Result<(), String>> },
+    Click {
+        label: String,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
     /// Submit form (press Enter)
-    Submit { respond: oneshot::Sender<Result<(), String>> },
+    Submit {
+        respond: oneshot::Sender<Result<(), String>>,
+    },
     /// Send a key press event
-    Key { key: String, respond: oneshot::Sender<Result<(), String>> },
+    Key {
+        key: String,
+        respond: oneshot::Sender<Result<(), String>>,
+    },
     /// Take screenshot - call respond with RGBA pixel data (width, height, pixels)
-    Screenshot { respond: oneshot::Sender<Result<ScreenshotData, String>> },
+    Screenshot {
+        respond: oneshot::Sender<Result<ScreenshotData, String>>,
+    },
 }
 
 /// Raw screenshot data from the application
@@ -122,28 +136,33 @@ impl Drop for SocketGuard {
 
 /// Clean up stale sockets from dead processes.
 fn cleanup_stale_sockets() {
-    let pattern = "/tmp/iced-debug-*.sock";
-    if let Ok(entries) = glob::glob(pattern) {
-        for entry in entries.flatten() {
-            // Extract PID from filename: /tmp/iced-debug-{pid}.sock
-            if let Some(filename) = entry.file_name().and_then(|f| f.to_str()) {
-                if let Some(pid_str) = filename
-                    .strip_prefix("iced-debug-")
-                    .and_then(|s| s.strip_suffix(".sock"))
-                {
-                    if let Ok(pid) = pid_str.parse::<i32>() {
-                        // Check if process is still alive using kill(pid, 0)
-                        // Returns 0 if process exists, -1 with ESRCH if not
-                        let exists = unsafe { libc::kill(pid, 0) } == 0;
-                        if !exists {
-                            if std::fs::remove_file(&entry).is_ok() {
-                                eprintln!("[iced-debug] Cleaned up stale socket: {}", entry.display());
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    let Ok(entries) = glob::glob("/tmp/iced-debug-*.sock") else {
+        return;
+    };
+    for entry in entries.flatten() {
+        remove_if_stale(&entry);
+    }
+}
+
+fn remove_if_stale(entry: &std::path::Path) {
+    let filename = match entry.file_name().and_then(|f| f.to_str()) {
+        Some(f) => f,
+        None => return,
+    };
+    let pid_str = match filename
+        .strip_prefix("iced-debug-")
+        .and_then(|s| s.strip_suffix(".sock"))
+    {
+        Some(s) => s,
+        None => return,
+    };
+    let pid: i32 = match pid_str.parse() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let exists = unsafe { libc::kill(pid, 0) } == 0;
+    if !exists && std::fs::remove_file(entry).is_ok() {
+        eprintln!("[iced-debug] Cleaned up stale socket: {}", entry.display());
     }
 }
 
@@ -213,10 +232,7 @@ async fn run_server(cmd_tx: mpsc::Sender<Command>, shutdown: Arc<AtomicBool>) {
 
 /// Accept a connection with timeout, returning None on timeout or error.
 async fn accept_connection(server: &peercred_ipc::Server) -> Option<peercred_ipc::Connection> {
-    let result = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        server.accept(),
-    ).await;
+    let result = tokio::time::timeout(std::time::Duration::from_millis(100), server.accept()).await;
 
     match result {
         Ok(Ok((conn, _caller))) => Some(conn),
@@ -237,7 +253,11 @@ async fn dispatch_request(
     match req {
         Request::Dump => handle_dump(conn, cmd_tx).await,
         Request::Input { field, value } => {
-            let cmd = |tx| Command::Input { field, value, respond: tx };
+            let cmd = |tx| Command::Input {
+                field,
+                value,
+                respond: tx,
+            };
             send_result_command(conn, cmd_tx, cmd, 2).await;
         }
         Request::Click { label } => {
@@ -252,7 +272,9 @@ async fn dispatch_request(
             let cmd = |tx| Command::Key { key, respond: tx };
             send_result_command(conn, cmd_tx, cmd, 2).await;
         }
-        Request::Ping => { let _ = conn.write(&Response::Pong).await; }
+        Request::Ping => {
+            let _ = conn.write(&Response::Pong).await;
+        }
         Request::Screenshot => handle_screenshot(conn, cmd_tx).await,
     }
 }
@@ -272,9 +294,15 @@ async fn send_result_command<F>(
         return;
     }
     match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
-        Ok(Ok(Ok(()))) => { let _ = conn.write(&Response::Ok).await; }
-        Ok(Ok(Err(e))) => { let _ = conn.write(&Response::Error(e)).await; }
-        _ => { let _ = conn.write(&Response::Error("Timeout".into())).await; }
+        Ok(Ok(Ok(()))) => {
+            let _ = conn.write(&Response::Ok).await;
+        }
+        Ok(Ok(Err(e))) => {
+            let _ = conn.write(&Response::Error(e)).await;
+        }
+        _ => {
+            let _ = conn.write(&Response::Error("Timeout".into())).await;
+        }
     }
 }
 
@@ -286,27 +314,41 @@ async fn handle_dump(conn: &mut peercred_ipc::Connection, cmd_tx: &mpsc::Sender<
         return;
     }
     match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
-        Ok(Ok(layout)) => { let _ = conn.write(&Response::Layout(layout)).await; }
-        _ => { let _ = conn.write(&Response::Error("Timeout".into())).await; }
+        Ok(Ok(layout)) => {
+            let _ = conn.write(&Response::Layout(layout)).await;
+        }
+        _ => {
+            let _ = conn.write(&Response::Error("Timeout".into())).await;
+        }
     }
 }
 
 /// Handle a Screenshot request: send command, encode JPEG, write response.
 async fn handle_screenshot(conn: &mut peercred_ipc::Connection, cmd_tx: &mpsc::Sender<Command>) {
     let (tx, rx) = oneshot::channel();
-    if cmd_tx.send(Command::Screenshot { respond: tx }).await.is_err() {
+    if cmd_tx
+        .send(Command::Screenshot { respond: tx })
+        .await
+        .is_err()
+    {
         let _ = conn.write(&Response::Error("App closed".into())).await;
         return;
     }
     match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
-        Ok(Ok(Ok(data))) => {
-            match encode_screenshot_jpeg(&data, 15) {
-                Ok(base64) => { let _ = conn.write(&Response::Screenshot(base64)).await; }
-                Err(e) => { let _ = conn.write(&Response::Error(e)).await; }
+        Ok(Ok(Ok(data))) => match encode_screenshot_jpeg(&data, 15) {
+            Ok(base64) => {
+                let _ = conn.write(&Response::Screenshot(base64)).await;
             }
+            Err(e) => {
+                let _ = conn.write(&Response::Error(e)).await;
+            }
+        },
+        Ok(Ok(Err(e))) => {
+            let _ = conn.write(&Response::Error(e)).await;
         }
-        Ok(Ok(Err(e))) => { let _ = conn.write(&Response::Error(e)).await; }
-        _ => { let _ = conn.write(&Response::Error("Timeout".into())).await; }
+        _ => {
+            let _ = conn.write(&Response::Error("Timeout".into())).await;
+        }
     }
 }
 
@@ -317,11 +359,9 @@ fn encode_screenshot_jpeg(data: &ScreenshotData, quality: u8) -> Result<String, 
     use std::io::Cursor;
 
     // Create image from RGBA pixels
-    let img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(
-        data.width,
-        data.height,
-        data.pixels.clone(),
-    ).ok_or("Invalid image dimensions")?;
+    let img: ImageBuffer<Rgba<u8>, _> =
+        ImageBuffer::from_raw(data.width, data.height, data.pixels.clone())
+            .ok_or("Invalid image dimensions")?;
 
     // Convert to RGB (JPEG doesn't support alpha)
     let rgb_img = image::DynamicImage::ImageRgba8(img).to_rgb8();
@@ -329,7 +369,9 @@ fn encode_screenshot_jpeg(data: &ScreenshotData, quality: u8) -> Result<String, 
     // Encode as JPEG with specified quality
     let mut buf = Cursor::new(Vec::new());
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
-    rgb_img.write_with_encoder(encoder).map_err(|e| e.to_string())?;
+    rgb_img
+        .write_with_encoder(encoder)
+        .map_err(|e| e.to_string())?;
 
     // Base64 encode
     Ok(base64::engine::general_purpose::STANDARD.encode(buf.into_inner()))
@@ -353,10 +395,13 @@ pub mod client {
 
     /// Type text into a field identified by placeholder.
     pub fn input<P: AsRef<Path>>(socket: P, field: &str, value: &str) -> Result<(), IpcError> {
-        let resp: Response = Client::call(socket, &Request::Input {
-            field: field.to_string(),
-            value: value.to_string(),
-        })?;
+        let resp: Response = Client::call(
+            socket,
+            &Request::Input {
+                field: field.to_string(),
+                value: value.to_string(),
+            },
+        )?;
         match resp {
             Response::Ok => Ok(()),
             Response::Error(e) => Err(IpcError::Io(std::io::Error::other(e))),
@@ -366,9 +411,12 @@ pub mod client {
 
     /// Click a button by label.
     pub fn click<P: AsRef<Path>>(socket: P, label: &str) -> Result<(), IpcError> {
-        let resp: Response = Client::call(socket, &Request::Click {
-            label: label.to_string(),
-        })?;
+        let resp: Response = Client::call(
+            socket,
+            &Request::Click {
+                label: label.to_string(),
+            },
+        )?;
         match resp {
             Response::Ok => Ok(()),
             Response::Error(e) => Err(IpcError::Io(std::io::Error::other(e))),
@@ -388,9 +436,12 @@ pub mod client {
 
     /// Send a key press event.
     pub fn key<P: AsRef<Path>>(socket: P, key: &str) -> Result<(), IpcError> {
-        let resp: Response = Client::call(socket, &Request::Key {
-            key: key.to_string(),
-        })?;
+        let resp: Response = Client::call(
+            socket,
+            &Request::Key {
+                key: key.to_string(),
+            },
+        )?;
         match resp {
             Response::Ok => Ok(()),
             Response::Error(e) => Err(IpcError::Io(std::io::Error::other(e))),
@@ -418,15 +469,17 @@ pub mod client {
     }
 
     /// Take a screenshot and save to a file.
-    pub fn screenshot_to_file<P: AsRef<Path>, Q: AsRef<Path>>(socket: P, path: Q) -> Result<(), IpcError> {
+    pub fn screenshot_to_file<P: AsRef<Path>, Q: AsRef<Path>>(
+        socket: P,
+        path: Q,
+    ) -> Result<(), IpcError> {
         use base64::Engine;
 
         let base64_data = screenshot(socket)?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&base64_data)
             .map_err(|e| IpcError::Io(std::io::Error::other(e.to_string())))?;
-        std::fs::write(path, bytes)
-            .map_err(IpcError::Io)?;
+        std::fs::write(path, bytes).map_err(IpcError::Io)?;
         Ok(())
     }
 

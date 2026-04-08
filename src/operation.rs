@@ -1,11 +1,11 @@
 //! The Operation implementation for layout inspection.
 
-use iced_core::widget::operation::{self, Focusable, Operation, Scrollable, TextInput};
 use iced_core::widget::Id;
+use iced_core::widget::operation::{self, Focusable, Operation, Scrollable, TextInput};
 use iced_core::{Rectangle, Vector};
 
-use crate::output::{LayoutDump, LayoutEntry, WidgetKind};
 use crate::Viewport;
+use crate::output::{LayoutDump, LayoutEntry, WidgetKind};
 
 /// An Operation that traverses the widget tree and collects layout information.
 ///
@@ -34,7 +34,13 @@ impl LayoutInspector {
         dump
     }
 
-    pub(crate) fn add_entry(&mut self, kind: WidgetKind, id: Option<&Id>, bounds: Rectangle, extra: Option<String>) {
+    pub(crate) fn add_entry(
+        &mut self,
+        kind: WidgetKind,
+        id: Option<&Id>,
+        bounds: Rectangle,
+        extra: Option<String>,
+    ) {
         let id_str = id.map(|i| format!("{:?}", i));
 
         let entry = LayoutEntry::new(
@@ -133,7 +139,8 @@ impl Operation<LayoutDump> for LayoutDumper {
     }
 
     fn container(&mut self, id: Option<&Id>, bounds: Rectangle) {
-        self.inspector.add_entry(WidgetKind::Container, id, bounds, None);
+        self.inspector
+            .add_entry(WidgetKind::Container, id, bounds, None);
     }
 
     fn scrollable(
@@ -148,7 +155,8 @@ impl Operation<LayoutDump> for LayoutDumper {
             "content: {:.0}x{:.0}",
             content_bounds.width, content_bounds.height
         );
-        self.inspector.add_entry(WidgetKind::Scrollable, id, bounds, Some(extra));
+        self.inspector
+            .add_entry(WidgetKind::Scrollable, id, bounds, Some(extra));
     }
 
     fn focusable(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Focusable) {
@@ -157,11 +165,13 @@ impl Operation<LayoutDump> for LayoutDumper {
         } else {
             None
         };
-        self.inspector.add_entry(WidgetKind::Focusable, id, bounds, extra);
+        self.inspector
+            .add_entry(WidgetKind::Focusable, id, bounds, extra);
     }
 
     fn text_input(&mut self, id: Option<&Id>, bounds: Rectangle, _state: &mut dyn TextInput) {
-        self.inspector.add_entry(WidgetKind::TextInput, id, bounds, None);
+        self.inspector
+            .add_entry(WidgetKind::TextInput, id, bounds, None);
     }
 
     fn text(&mut self, id: Option<&Id>, bounds: Rectangle, text: &str) {
@@ -170,11 +180,13 @@ impl Operation<LayoutDump> for LayoutDumper {
         } else {
             Some(text.to_string())
         };
-        self.inspector.add_entry(WidgetKind::Text, id, bounds, extra);
+        self.inspector
+            .add_entry(WidgetKind::Text, id, bounds, extra);
     }
 
     fn custom(&mut self, id: Option<&Id>, bounds: Rectangle, _state: &mut dyn std::any::Any) {
-        self.inspector.add_entry(WidgetKind::Custom, id, bounds, None);
+        self.inspector
+            .add_entry(WidgetKind::Custom, id, bounds, None);
     }
 
     fn finish(&self) -> operation::Outcome<LayoutDump> {

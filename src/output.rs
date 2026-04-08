@@ -317,7 +317,14 @@ impl LayoutDump {
 
             output.push_str(&format!(
                 "{}{}{}{}{} {}{}{}\n",
-                warning_prefix, indent, entry.kind, id_str, extra_str, bounds, color_str, warning_str
+                warning_prefix,
+                indent,
+                entry.kind,
+                id_str,
+                extra_str,
+                bounds,
+                color_str,
+                warning_str
             ));
         }
 
