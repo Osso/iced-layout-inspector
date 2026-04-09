@@ -31,17 +31,17 @@ jobs:
           workspaces: lib/iced-layout-inspector
 
       - name: Check formatting
-        run: cargo fmt --check
         working-directory: lib/iced-layout-inspector
+        run: cargo fmt --check
 
       - name: Clippy
-        run: cargo clippy
         working-directory: lib/iced-layout-inspector
+        run: cargo clippy
 
       - name: Build
-        run: cargo build
         working-directory: lib/iced-layout-inspector
+        run: cargo build
 
       - name: Run tests
-        run: cargo test
         working-directory: lib/iced-layout-inspector
+        run: cargo test

@@ -248,13 +248,11 @@ impl LayoutDump {
     fn format_tree(&self) -> String {
         let mut output = String::new();
 
-        // Header
         output.push_str(&format!(
             "[Viewport: {}x{}]\n\n",
             self.viewport.width, self.viewport.height
         ));
 
-        // Summary
         let total = self.entries.len();
         let with_warnings = self.warning_count();
         if with_warnings > 0 {
@@ -266,66 +264,9 @@ impl LayoutDump {
             output.push_str(&format!("Found {} widgets, no warnings\n\n", total));
         }
 
-        // Tree
         for (i, entry) in self.entries.iter().enumerate() {
-            // Determine tree characters
             let indent = self.make_indent(i, entry.depth);
-
-            // Format bounds
-            let bounds = format!(
-                "({:.0},{:.0} {:.0}x{:.0})",
-                entry.x, entry.y, entry.width, entry.height
-            );
-
-            // Format widget info
-            let id_str = entry
-                .id
-                .as_ref()
-                .map(|id| format!(" #{}", id))
-                .unwrap_or_default();
-
-            let extra_str = entry
-                .extra
-                .as_ref()
-                .map(|e| {
-                    let truncated = if e.chars().count() > 30 {
-                        format!("{}...", e.chars().take(27).collect::<String>())
-                    } else {
-                        e.clone()
-                    };
-                    format!(" \"{}\"", truncated)
-                })
-                .unwrap_or_default();
-
-            // Format warnings
-            let warning_str = if entry.warnings.is_empty() {
-                String::new()
-            } else {
-                let w: Vec<_> = entry.warnings.iter().map(|w| format!("{}", w)).collect();
-                format!(" [{}]", w.join(", "))
-            };
-
-            // Format colors
-            let color_str = match (&entry.background, &entry.text_color) {
-                (Some(bg), Some(fg)) => format!(" bg:{} fg:{}", bg, fg),
-                (Some(bg), None) => format!(" bg:{}", bg),
-                (None, Some(fg)) => format!(" fg:{}", fg),
-                (None, None) => String::new(),
-            };
-
-            let warning_prefix = if entry.has_warnings() { "! " } else { "  " };
-
-            output.push_str(&format!(
-                "{}{}{}{}{} {}{}{}\n",
-                warning_prefix,
-                indent,
-                entry.kind,
-                id_str,
-                extra_str,
-                bounds,
-                color_str,
-                warning_str
-            ));
+            output.push_str(&format_entry(entry, &indent));
         }
 
         output
@@ -369,6 +310,46 @@ impl LayoutDump {
     }
 }
 
+fn format_entry(entry: &LayoutEntry, indent: &str) -> String {
+    let bounds = format!(
+        "({:.0},{:.0} {:.0}x{:.0})",
+        entry.x, entry.y, entry.width, entry.height
+    );
+    let id_str = entry
+        .id
+        .as_ref()
+        .map(|id| format!(" #{}", id))
+        .unwrap_or_default();
+    let extra_str = entry
+        .extra
+        .as_ref()
+        .map(|e| {
+            let truncated = if e.chars().count() > 30 {
+                format!("{}...", e.chars().take(27).collect::<String>())
+            } else {
+                e.clone()
+            };
+            format!(" \"{}\"", truncated)
+        })
+        .unwrap_or_default();
+    let warning_str = if entry.warnings.is_empty() {
+        String::new()
+    } else {
+        let w: Vec<_> = entry.warnings.iter().map(|w| format!("{}", w)).collect();
+        format!(" [{}]", w.join(", "))
+    };
+    let color_str = match (&entry.background, &entry.text_color) {
+        (Some(bg), Some(fg)) => format!(" bg:{} fg:{}", bg, fg),
+        (Some(bg), None) => format!(" bg:{}", bg),
+        (None, Some(fg)) => format!(" fg:{}", fg),
+        (None, None) => String::new(),
+    };
+    let warning_prefix = if entry.has_warnings() { "! " } else { "  " };
+    format!(
+        "{}{}{}{}{} {}{}{}\n",
+        warning_prefix, indent, entry.kind, id_str, extra_str, bounds, color_str, warning_str
+    )
+}
 impl fmt::Display for LayoutDump {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.format_tree())
