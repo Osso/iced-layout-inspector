@@ -311,47 +311,234 @@ impl LayoutDump {
 }
 
 fn format_entry(entry: &LayoutEntry, indent: &str) -> String {
-    let bounds = format!(
-        "({:.0},{:.0} {:.0}x{:.0})",
-        entry.x, entry.y, entry.width, entry.height
-    );
-    let id_str = entry
-        .id
-        .as_ref()
-        .map(|id| format!(" #{}", id))
-        .unwrap_or_default();
-    let extra_str = entry
-        .extra
-        .as_ref()
-        .map(|e| {
-            let truncated = if e.chars().count() > 30 {
-                format!("{}...", e.chars().take(27).collect::<String>())
-            } else {
-                e.clone()
-            };
-            format!(" \"{}\"", truncated)
-        })
-        .unwrap_or_default();
-    let warning_str = if entry.warnings.is_empty() {
-        String::new()
-    } else {
-        let w: Vec<_> = entry.warnings.iter().map(|w| format!("{}", w)).collect();
-        format!(" [{}]", w.join(", "))
-    };
-    let color_str = match (&entry.background, &entry.text_color) {
-        (Some(bg), Some(fg)) => format!(" bg:{} fg:{}", bg, fg),
-        (Some(bg), None) => format!(" bg:{}", bg),
-        (None, Some(fg)) => format!(" fg:{}", fg),
-        (None, None) => String::new(),
-    };
+    let bounds = format_bounds(entry);
+    let id_str = format_id(entry);
+    let extra_str = format_extra(entry);
+    let warning_str = format_warnings(entry);
+    let color_str = format_colors(entry);
     let warning_prefix = if entry.has_warnings() { "! " } else { "  " };
     format!(
         "{}{}{}{}{} {}{}{}\n",
         warning_prefix, indent, entry.kind, id_str, extra_str, bounds, color_str, warning_str
     )
 }
+
+fn format_bounds(entry: &LayoutEntry) -> String {
+    format!(
+        "({:.0},{:.0} {:.0}x{:.0})",
+        entry.x, entry.y, entry.width, entry.height
+    )
+}
+
+fn format_id(entry: &LayoutEntry) -> String {
+    entry
+        .id
+        .as_ref()
+        .map(|id| format!(" #{}", id))
+        .unwrap_or_default()
+}
+
+fn format_extra(entry: &LayoutEntry) -> String {
+    entry
+        .extra
+        .as_ref()
+        .map(|extra| format!(" \"{}\"", truncate_extra(extra)))
+        .unwrap_or_default()
+}
+
+fn truncate_extra(extra: &str) -> String {
+    if extra.chars().count() > 30 {
+        format!("{}...", extra.chars().take(27).collect::<String>())
+    } else {
+        extra.to_owned()
+    }
+}
+
+fn format_warnings(entry: &LayoutEntry) -> String {
+    if entry.warnings.is_empty() {
+        return String::new();
+    }
+
+    let warning_list: Vec<_> = entry.warnings.iter().map(ToString::to_string).collect();
+    format!(" [{}]", warning_list.join(", "))
+}
+
+fn format_colors(entry: &LayoutEntry) -> String {
+    match (&entry.background, &entry.text_color) {
+        (Some(bg), Some(fg)) => format!(" bg:{} fg:{}", bg, fg),
+        (Some(bg), None) => format!(" bg:{}", bg),
+        (None, Some(fg)) => format!(" fg:{}", fg),
+        (None, None) => String::new(),
+    }
+}
+
 impl fmt::Display for LayoutDump {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.format_tree())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DumpColor, LayoutDump, LayoutEntry, LayoutWarning, WidgetKind};
+    use crate::Viewport;
+    use std::fs;
+
+    fn viewport() -> Viewport {
+        Viewport::new(100.0, 80.0)
+    }
+
+    fn entry(depth: usize, kind: WidgetKind, bounds: (f32, f32, f32, f32)) -> LayoutEntry {
+        let (x, y, width, height) = bounds;
+        LayoutEntry::new(depth, kind, None, x, y, width, height, None, viewport())
+    }
+
+    #[test]
+    fn widget_kind_display_names_match_dump_format() {
+        let cases = [
+            (WidgetKind::Container, "Container"),
+            (WidgetKind::Scrollable, "Scrollable"),
+            (WidgetKind::Focusable, "Focusable"),
+            (WidgetKind::TextInput, "TextInput"),
+            (WidgetKind::Text, "Text"),
+            (WidgetKind::Custom, "Custom"),
+        ];
+
+        for (kind, expected) in cases {
+            assert_eq!(kind.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn layout_warning_display_names_are_human_readable() {
+        let cases = [
+            (LayoutWarning::Invisible, "INVISIBLE (0x0)"),
+            (LayoutWarning::ZeroWidth, "ZERO WIDTH"),
+            (LayoutWarning::ZeroHeight, "ZERO HEIGHT"),
+            (LayoutWarning::Offscreen, "OFFSCREEN"),
+            (LayoutWarning::PartiallyOffscreen, "PARTIALLY OFFSCREEN"),
+            (LayoutWarning::TooSmall, "TOO SMALL (<1px)"),
+        ];
+
+        for (warning, expected) in cases {
+            assert_eq!(warning.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn dump_color_formats_rgb_and_rgba_hex() {
+        let opaque = DumpColor::new(1.0, 0.5, 0.0, 1.0);
+        let transparent = DumpColor::new(0.0, 0.25, 1.0, 0.5);
+        let iced = DumpColor::from_iced(iced_core::Color::from_rgba(0.25, 0.5, 0.75, 1.0));
+
+        assert_eq!(opaque.to_hex(), "#FF8000");
+        assert_eq!(opaque.to_string(), "#FF8000");
+        assert_eq!(transparent.to_hex(), "#0040FF80");
+        assert_eq!(iced.to_hex(), "#4080BF");
+    }
+
+    #[test]
+    fn layout_entry_detects_zero_size_and_offscreen_warnings() {
+        let invisible = entry(0, WidgetKind::Container, (0.0, 0.0, 0.0, 0.0));
+        let zero_width = entry(0, WidgetKind::Container, (0.0, 0.0, 0.0, 20.0));
+        let zero_height = entry(0, WidgetKind::Container, (0.0, 0.0, 20.0, 0.0));
+        let offscreen = entry(0, WidgetKind::Container, (-1.0, 0.0, 20.0, 20.0));
+        let partial = entry(0, WidgetKind::Container, (90.0, 70.0, 20.0, 20.0));
+        let too_small = entry(0, WidgetKind::Container, (0.0, 0.0, 0.5, 20.0));
+
+        assert_eq!(invisible.warnings, vec![LayoutWarning::Invisible]);
+        assert_eq!(zero_width.warnings, vec![LayoutWarning::ZeroWidth]);
+        assert_eq!(zero_height.warnings, vec![LayoutWarning::ZeroHeight]);
+        assert_eq!(offscreen.warnings, vec![LayoutWarning::Offscreen]);
+        assert_eq!(partial.warnings, vec![LayoutWarning::PartiallyOffscreen]);
+        assert_eq!(too_small.warnings, vec![LayoutWarning::TooSmall]);
+    }
+
+    #[test]
+    fn layout_entry_builder_methods_add_colors() {
+        let background = DumpColor::new(1.0, 0.0, 0.0, 1.0);
+        let text_color = DumpColor::new(0.0, 1.0, 0.0, 1.0);
+
+        let entry = entry(0, WidgetKind::Text, (0.0, 0.0, 10.0, 10.0))
+            .with_background(background.clone())
+            .with_text_color(text_color.clone());
+
+        assert_eq!(
+            entry.background.as_ref().map(DumpColor::to_hex),
+            Some(background.to_hex())
+        );
+        assert_eq!(
+            entry.text_color.as_ref().map(DumpColor::to_hex),
+            Some(text_color.to_hex())
+        );
+        assert!(!entry.has_warnings());
+    }
+
+    #[test]
+    fn layout_dump_reports_warnings_and_tree_format() {
+        let mut dump = LayoutDump::new(viewport());
+        dump.push(LayoutEntry::new(
+            0,
+            WidgetKind::Container,
+            Some("root".to_string()),
+            0.0,
+            0.0,
+            100.0,
+            80.0,
+            None,
+            viewport(),
+        ));
+        dump.push(LayoutEntry::new(
+            1,
+            WidgetKind::Text,
+            None,
+            10.0,
+            10.0,
+            20.0,
+            10.0,
+            Some("abcdefghijklmnopqrstuvwxyz1234567890".to_string()),
+            viewport(),
+        ));
+        dump.push(LayoutEntry::new(
+            1,
+            WidgetKind::Container,
+            Some("broken".to_string()),
+            10.0,
+            20.0,
+            20.0,
+            0.0,
+            None,
+            viewport(),
+        ));
+
+        let warnings: Vec<_> = dump.warnings().collect();
+        let tree = dump.to_string();
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(dump.warning_count(), 1);
+        assert!(tree.contains("[Viewport: 100x80]"));
+        assert!(tree.contains("Found 3 widgets, 1 with warnings"));
+        assert!(tree.contains("  Container #root (0,0 100x80)"));
+        assert!(tree.contains("|- Text \"abcdefghijklmnopqrstuvwxyz1...\" (10,10 20x10)"));
+        assert!(tree.contains("! `- Container #broken (10,20 20x0) [ZERO HEIGHT]"));
+    }
+
+    #[test]
+    fn layout_dump_writes_tree_to_file() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "iced-layout-inspector-test-{}.txt",
+            std::process::id()
+        ));
+
+        let mut dump = LayoutDump::new(viewport());
+        dump.push(entry(0, WidgetKind::Custom, (1.0, 2.0, 3.0, 4.0)));
+
+        dump.write_to_file(&path).expect("write layout dump");
+        let written = fs::read_to_string(&path).expect("read layout dump");
+        fs::remove_file(&path).expect("remove layout dump");
+
+        assert!(written.contains("Found 1 widgets, no warnings"));
+        assert!(written.contains("Custom (1,2 3x4)"));
     }
 }

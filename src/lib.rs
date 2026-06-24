@@ -54,3 +54,24 @@ impl From<iced_core::Size> for Viewport {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Viewport;
+
+    #[test]
+    fn viewport_preserves_explicit_dimensions() {
+        let viewport = Viewport::new(640.0, 480.0);
+
+        assert_eq!(viewport.width, 640.0);
+        assert_eq!(viewport.height, 480.0);
+    }
+
+    #[test]
+    fn viewport_converts_from_iced_size() {
+        let viewport = Viewport::from(iced_core::Size::new(320.0, 200.0));
+
+        assert_eq!(viewport.width, 320.0);
+        assert_eq!(viewport.height, 200.0);
+    }
+}

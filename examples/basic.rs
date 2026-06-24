@@ -2,9 +2,9 @@
 //!
 //! Run with: cargo run --example basic --features tiny-skia
 
-use iced::widget::{button, column, container, row, text};
-use iced::{Element, Length, Size, Theme};
-use iced_layout_inspector::{LayoutInspector, Viewport};
+use iced::widget::{button, column, container, text};
+use iced::{Element, Length};
+use iced_layout_inspector::Viewport;
 
 /// A simple counter state
 struct Counter {
@@ -22,7 +22,7 @@ impl Counter {
         Self { value: 0 }
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let content = column![
             button("+").on_press(Message::Increment),
             text(self.value).size(50),
@@ -68,90 +68,130 @@ fn main() {
     // // Or write to file for Claude to read
     // dump.write_to_file("layout.txt").unwrap();
     // ```
+    let counter = Counter::new();
+    let _preview = counter.view();
 
+    print_intro();
+    let dump = create_demo_dump();
+    println!("{}", dump);
+}
+
+fn print_intro() {
     println!("This example shows the structure of using iced-layout-inspector.");
     println!("See the source code for usage patterns.");
     println!();
+}
 
-    // Demo the output format
+fn create_demo_dump() -> iced_layout_inspector::LayoutDump {
+    use iced_layout_inspector::LayoutDump;
+
     let viewport = Viewport::new(800.0, 600.0);
-    let mut dump = iced_layout_inspector::LayoutDump::new(viewport);
+    let mut dump = LayoutDump::new(viewport);
+    add_demo_entries(&mut dump, viewport);
+    dump
+}
 
-    // Manually add some entries to show the output format
-    use iced_layout_inspector::{LayoutEntry, WidgetKind};
+fn add_demo_entries(dump: &mut iced_layout_inspector::LayoutDump, viewport: Viewport) {
+    push_root_container(dump, viewport);
+    push_inner_container(dump, viewport);
+    push_plus_button(dump, viewport);
+    push_value_text(dump, viewport);
+    push_minus_button(dump, viewport);
+    push_broken_container(dump, viewport);
+}
 
-    dump.entries.push(LayoutEntry::new(
+fn push_root_container(dump: &mut iced_layout_inspector::LayoutDump, viewport: Viewport) {
+    push_demo_entry(
+        dump,
+        viewport,
         0,
-        WidgetKind::Container,
-        Some("root".to_string()),
-        0.0,
-        0.0,
-        800.0,
-        600.0,
+        iced_layout_inspector::WidgetKind::Container,
+        Some("root"),
+        (0.0, 0.0, 800.0, 600.0),
         None,
-        viewport,
-    ));
+    );
+}
 
-    dump.entries.push(LayoutEntry::new(
+fn push_inner_container(dump: &mut iced_layout_inspector::LayoutDump, viewport: Viewport) {
+    push_demo_entry(
+        dump,
+        viewport,
         1,
-        WidgetKind::Container,
+        iced_layout_inspector::WidgetKind::Container,
         None,
-        350.0,
-        250.0,
-        100.0,
-        100.0,
+        (350.0, 250.0, 100.0, 100.0),
         None,
-        viewport,
-    ));
+    );
+}
 
-    dump.entries.push(LayoutEntry::new(
+fn push_plus_button(dump: &mut iced_layout_inspector::LayoutDump, viewport: Viewport) {
+    push_demo_entry(
+        dump,
+        viewport,
         2,
-        WidgetKind::Focusable,
-        Some("btn-plus".to_string()),
-        350.0,
-        250.0,
-        100.0,
-        30.0,
+        iced_layout_inspector::WidgetKind::Focusable,
+        Some("btn-plus"),
+        (350.0, 250.0, 100.0, 30.0),
         None,
-        viewport,
-    ));
+    );
+}
 
-    dump.entries.push(LayoutEntry::new(
+fn push_value_text(dump: &mut iced_layout_inspector::LayoutDump, viewport: Viewport) {
+    push_demo_entry(
+        dump,
+        viewport,
         2,
-        WidgetKind::Text,
+        iced_layout_inspector::WidgetKind::Text,
         None,
-        380.0,
-        290.0,
-        40.0,
-        50.0,
-        Some("42".to_string()),
-        viewport,
-    ));
+        (380.0, 290.0, 40.0, 50.0),
+        Some("42"),
+    );
+}
 
-    dump.entries.push(LayoutEntry::new(
+fn push_minus_button(dump: &mut iced_layout_inspector::LayoutDump, viewport: Viewport) {
+    push_demo_entry(
+        dump,
+        viewport,
         2,
-        WidgetKind::Focusable,
-        Some("btn-minus".to_string()),
-        350.0,
-        350.0,
-        100.0,
-        30.0,
+        iced_layout_inspector::WidgetKind::Focusable,
+        Some("btn-minus"),
+        (350.0, 350.0, 100.0, 30.0),
         None,
-        viewport,
-    ));
+    );
+}
 
+fn push_broken_container(dump: &mut iced_layout_inspector::LayoutDump, viewport: Viewport) {
     // Demo a problematic element (zero height)
-    dump.entries.push(LayoutEntry::new(
+    push_demo_entry(
+        dump,
+        viewport,
         2,
-        WidgetKind::Container,
-        Some("broken".to_string()),
-        350.0,
-        390.0,
-        100.0,
-        0.0, // Zero height!
+        iced_layout_inspector::WidgetKind::Container,
+        Some("broken"),
+        (350.0, 390.0, 100.0, 0.0), // Zero height!
         None,
+    );
+}
+
+fn push_demo_entry(
+    dump: &mut iced_layout_inspector::LayoutDump,
+    viewport: Viewport,
+    depth: usize,
+    kind: iced_layout_inspector::WidgetKind,
+    id: Option<&str>,
+    bounds: (f32, f32, f32, f32),
+    extra: Option<&str>,
+) {
+    let (x, y, width, height) = bounds;
+    dump.entries.push(iced_layout_inspector::LayoutEntry::new(
+        depth,
+        kind,
+        id.map(str::to_string),
+        x,
+        y,
+        width,
+        height,
+        extra.map(str::to_string),
         viewport,
     ));
-
-    println!("{}", dump);
 }
